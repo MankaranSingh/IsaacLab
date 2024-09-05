@@ -85,6 +85,7 @@ class LocomotionAMPEnv(DirectRLEnv):
         self._amp_batch_size = 512
         self._amp_obs_demo_buf = torch.zeros((self._amp_batch_size, self._num_amp_obs_steps, NUM_AMP_OBS_PER_STEP), device=self.device, dtype=torch.float)
         self.num_amp_obs = self._num_amp_obs_steps * NUM_AMP_OBS_PER_STEP
+        self.task_reward = torch.ones(self.num_envs, device=self.device)
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -250,8 +251,7 @@ class LocomotionAMPEnv(DirectRLEnv):
         #     self.cfg.alive_reward_scale,
         #     self.motor_effort_ratio,
         # )
-        total_reward = torch.ones(self.num_envs)
-        return total_reward
+        return self.task_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         self._compute_intermediate_values()
