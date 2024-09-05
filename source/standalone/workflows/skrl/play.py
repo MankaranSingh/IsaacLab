@@ -16,7 +16,7 @@ a more user-friendly way.
 import argparse
 
 from omni.isaac.lab.app import AppLauncher
-
+import carb
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Play a checkpoint of an RL agent from skrl.")
 parser.add_argument("--cpu", action="store_true", default=False, help="Use CPU pipeline.")
@@ -133,11 +133,35 @@ def main():
 
     # reset environment
     obs, _ = env.reset()
+
+    input = carb.input.acquire_input_interface()
+    keyboard = omni.appwindow.get_default_app_window().get_keyboard()
+    T = 1
+    R = 1
+    key_to_control = {
+        "UP": [T, 0.0, 0.0],
+        "DOWN": [-T, 0.0, 0.0],
+        "LEFT": [0.0, T, 0.0],
+        "RIGHT": [0.0, -T, 0.0],
+        "Z": [0.0, 0.0, R],
+        "X": [0.0, 0.0, -R],
+    }
+    
+    CURRENT_COMMAND = [0.0, 0.0, 0.0]
+    def on_keyboard_event(event, *args, **kwargs):
+        if event.type == carb.input.KeyboardEventType.KEY_PRESS:
+            if event.input.name in key_to_control:
+                CURRENT_COMMAND[:] = key_to_control[event.input.name]
+        elif event.type == carb.input.KeyboardEventType.KEY_RELEASE:
+            CURRENT_COMMAND[:] = [0.0, 0.0, 0.0]
+    sub_keyboard = input.subscribe_to_keyboard_events(keyboard, on_keyboard_event)
+
     # simulate environment
     while simulation_app.is_running():
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
+            obs[:, 9:12] = torch.tensor(CURRENT_COMMAND, device=env.device)
             actions = agent.act(obs, timestep=0, timesteps=0)[0]
             # env stepping
             obs, _, _, _, _ = env.step(actions)

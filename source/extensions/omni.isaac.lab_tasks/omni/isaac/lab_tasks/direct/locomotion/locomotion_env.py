@@ -28,7 +28,7 @@ class LocomotionEnv(DirectRLEnv):
         self.action_scale = self.cfg.action_scale
         self.joint_gears = torch.tensor(self.cfg.joint_gears, dtype=torch.float32, device=self.sim.device)
         self.motor_effort_ratio = torch.ones_like(self.joint_gears, device=self.sim.device)
-        self._joint_dof_idx, _ = self.robot.find_joints(".*")
+        self._joint_dof_idx, _ = self.robot.find_joints(".*", preserve_order=True)
 
         self.potentials = torch.zeros(self.num_envs, dtype=torch.float32, device=self.sim.device)
         self.prev_potentials = torch.zeros_like(self.potentials)
@@ -71,6 +71,10 @@ class LocomotionEnv(DirectRLEnv):
         self.torso_position, self.torso_rotation = self.robot.data.root_pos_w, self.robot.data.root_quat_w
         self.velocity, self.ang_velocity = self.robot.data.root_lin_vel_w, self.robot.data.root_ang_vel_w
         self.dof_pos, self.dof_vel = self.robot.data.joint_pos, self.robot.data.joint_vel
+
+        #print("### root", self.torso_position.shape, self.torso_rotation.shape, self.velocity.shape, self.ang_velocity.shape)
+        print("### dofs", self.dof_pos.shape, self.dof_vel.shape, self.robot.data.body_names)
+        print("### body", self.robot.data.body_pos_w.shape)
 
         (
             self.up_proj,

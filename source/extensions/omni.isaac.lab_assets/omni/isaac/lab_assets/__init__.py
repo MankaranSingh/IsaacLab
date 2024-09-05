@@ -32,6 +32,7 @@ from .anymal import *
 from .cartpole import *
 from .franka import *
 from .humanoid import *
+from .humanoid_amp import *
 from .kinova import *
 from .quadcopter import *
 from .ridgeback_franka import *

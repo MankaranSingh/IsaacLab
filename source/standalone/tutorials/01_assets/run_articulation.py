@@ -104,7 +104,7 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
             print("[INFO]: Resetting robot state...")
         # Apply random action
         # -- generate random joint efforts
-        efforts = torch.randn_like(robot.data.joint_pos) * 5.0
+        efforts = torch.randn_like(robot.data.joint_pos) * 50
         # -- apply action to the robot
         robot.set_joint_effort_target(efforts)
         # -- write data to sim

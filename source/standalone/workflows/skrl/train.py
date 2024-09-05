@@ -46,6 +46,7 @@ import os
 from datetime import datetime
 
 from skrl.agents.torch.ppo import PPO, PPO_DEFAULT_CONFIG
+from skrl.agents.torch.amp import AMP, AMP_DEFAULT_CONFIG
 from skrl.memories.torch import RandomMemory
 from skrl.utils import set_seed
 from skrl.utils.model_instantiators.torch import deterministic_model, gaussian_model, shared_model
