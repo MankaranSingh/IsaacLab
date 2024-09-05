@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import torch
 import numpy as np
 
@@ -13,11 +14,14 @@ from omni.isaac.core.utils.torch.rotations import compute_heading_and_up, comput
 from omni.isaac.core.utils.torch.torch_jit_utils import quat_mul, calc_heading_quat_inv, \
                                                         exp_map_to_quat, quat_to_tan_norm, my_quat_rotate, calc_heading_quat_inv
 
+from omni.isaac.lab.utils.poselib.motion_lib_lab import MotionLib
+
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.assets import Articulation
 from omni.isaac.lab.envs import DirectRLEnv, DirectRLEnvCfg
 
 
+NUM_DOFS = 28
 DOF_BODY_IDS = [1, 2, 3, 4, 6, 7, 9, 10, 11, 12, 13, 14]
 DOF_OFFSETS = [0, 3, 6, 9, 10, 13, 14, 17, 18, 21, 24, 25, 28]
 
@@ -34,6 +38,8 @@ KEY_BODY_NAMES = ["right_hand", "left_hand", "right_foot", "left_foot"]
 
 KEY_BODY_IDS = np.array([BODY_NAMES_ISAAC_GYM.index(body) for body in KEY_BODY_NAMES])
 LAB_IDS = np.array([BODY_NAMES_LAB.index(body) for body in BODY_NAMES_ISAAC_GYM])
+
+NUM_AMP_OBS_PER_STEP = 13 + 52 + 28 + 12 # [root_h, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_body_pos]
 
 
 def normalize_angle(x):
@@ -66,7 +72,19 @@ class LocomotionAMPEnv(DirectRLEnv):
         self.basis_vec0 = self.heading_vec.clone()
         self.basis_vec1 = self.up_vec.clone()
 
+        # AMP specific
+        motion_file = "amp_humanoid_backflip.npy"
+        motion_file_path = os.path.join("/home/mankaran/orbit/source/extensions/omni.isaac.lab_assets/omni/isaac/lab_assets/humanoid_amp/motions", motion_file)
+        self._motion_lib = MotionLib(motion_file=motion_file_path, 
+                                     num_dofs=NUM_DOFS,
+                                     device=self.device)
+
         self._build_pd_action_offset_scale(self.robot.data.default_joint_limits[0])
+        self._num_amp_obs_steps = 2
+        assert(self._num_amp_obs_steps >= 2)
+        self._amp_batch_size = 512
+        self._amp_obs_demo_buf = torch.zeros((self._amp_batch_size, self._num_amp_obs_steps, NUM_AMP_OBS_PER_STEP), device=self.device, dtype=torch.float)
+        self.num_amp_obs = self._num_amp_obs_steps * NUM_AMP_OBS_PER_STEP
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot)
@@ -85,12 +103,35 @@ class LocomotionAMPEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor):
         self._actions = actions.clone()
-        #self._processed_actions = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
-        self._processed_actions = self._pd_action_offset + self._pd_action_scale * self.actions
+        self._processed_actions = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
+        #self._processed_actions = self._pd_action_offset + self._pd_action_scale * self.actions
 
     def _apply_action(self):
         # pd_targets = self._pd_action_offset + self._pd_action_scale * self.actions
         self.robot.set_joint_position_target(self._processed_actions, joint_ids=self._joint_dof_idx)
+    
+    def fetch_amp_obs_demo(self, num_samples):
+        dt = self.sim.cfg.dt
+        motion_ids = self._motion_lib.sample_motions(num_samples)
+            
+        truncate_time = dt * (self._num_amp_obs_steps - 1)
+        motion_times0 = self._motion_lib.sample_time(motion_ids, truncate_time=truncate_time)
+        motion_times0 += truncate_time
+        
+        motion_ids = np.tile(np.expand_dims(motion_ids, axis=-1), [1, self._num_amp_obs_steps])
+        motion_times = np.expand_dims(motion_times0, axis=-1)
+        time_steps = -dt * np.arange(0, self._num_amp_obs_steps)
+        motion_times = motion_times + time_steps
+
+        motion_ids = motion_ids.flatten()
+        motion_times = motion_times.flatten()
+        root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos \
+               = self._motion_lib.get_motion_state(motion_ids, motion_times)
+        amp_obs_demo = build_amp_observations(root_pos, root_rot, root_vel, root_ang_vel, dof_pos, dof_vel, key_pos)
+        self._amp_obs_demo_buf[:] = amp_obs_demo.view(self._amp_obs_demo_buf.shape)
+
+        amp_obs_demo_flat = self._amp_obs_demo_buf.view(-1, self.num_amp_obs)
+        return amp_obs_demo_flat
     
     def _build_pd_action_offset_scale(self, joint_limits):
         num_joints = len(DOF_OFFSETS_LAB) - 1
@@ -223,9 +264,26 @@ class LocomotionAMPEnv(DirectRLEnv):
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
 
-        joint_pos = self.robot.data.default_joint_pos[env_ids]
-        joint_vel = self.robot.data.default_joint_vel[env_ids]
+        num_envs = env_ids.shape[0]
+        motion_ids = self._motion_lib.sample_motions(num_envs)
+        motion_times = self._motion_lib.sample_time(motion_ids)
+        #motion_times = np.zeros(num_envs)
+
+        # set half elements to start of the clip
+        indices = np.random.choice(num_envs, num_envs//2, replace=False)    
+        motion_times[indices] = 0
+
+        root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos \
+               = self._motion_lib.get_motion_state(motion_ids, motion_times)
+
+        joint_pos = dof_pos
+        joint_vel = dof_vel
         default_root_state = self.robot.data.default_root_state[env_ids]
+        default_root_state[:, :3] = root_pos
+        default_root_state[:, 3:7] = root_rot
+        default_root_state[:, 7:10] = root_vel
+        default_root_state[:, 10:13] = root_ang_vel
+        
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
 
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
