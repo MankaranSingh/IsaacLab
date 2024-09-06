@@ -248,7 +248,6 @@ class Articulation(RigidObject):
         """
         if joint_subset is None:
             joint_subset = self.joint_names
-        print("joint names#####", self.joint_names)
         # find joints
         return string_utils.resolve_matching_names(name_keys, joint_subset, preserve_order)
 
@@ -844,13 +843,10 @@ class Articulation(RigidObject):
         # -- root view
         root_view_body_names = self.body_names
 
-        print(self.body_names, )
         # -- body view
         prim_paths = self._body_physx_view.prim_paths[: self.num_bodies]
         body_view_body_names = [path.split("/")[-1] for path in prim_paths]
-        print(prim_paths)
-        print(root_view_body_names, "########")
-        print(body_view_body_names)
+ 
         # -- mapping from articulation view to body view
         self._body_view_ordering = [body_view_body_names.index(name) for name in root_view_body_names]
         self._body_view_ordering = torch.tensor(self._body_view_ordering, dtype=torch.long, device=self.device)

@@ -88,7 +88,7 @@ class HumanoidAMPEnvCfg(DirectRLEnvCfg):
     decimation = 2
     action_scale = 1.0
     num_actions = 28
-    num_observations = 96
+    num_observations = 105
     num_states = 0
 
     heading_weight: float = 0.5
@@ -100,7 +100,7 @@ class HumanoidAMPEnvCfg(DirectRLEnvCfg):
     dof_vel_scale: float = 0.01
 
     death_cost: float = -1.0
-    termination_height: float = 0.7
+    termination_height: float = 0.4
 
     angular_velocity_scale: float = 0.25
     contact_force_scale: float = 0.01
