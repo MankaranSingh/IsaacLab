@@ -16,8 +16,8 @@ from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 # Configuration
 ##
 
-STIFFNESS = 70.0
-DAMPING = 5.0
+STIFFNESS = 100.0
+DAMPING = 2.0
 
 HUMANOID_AMP_CFG = ArticulationCfg(
     prim_path="{ENV_REGEX_NS}/Robot",

@@ -56,8 +56,6 @@ class LocomotionAMPEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
 
         self.action_scale = self.cfg.action_scale
-        self.joint_gears = torch.tensor(self.cfg.joint_gears, dtype=torch.float32, device=self.sim.device)
-        self.motor_effort_ratio = torch.ones_like(self.joint_gears, device=self.sim.device)
         self._joint_dof_idx, _ = self.robot.find_joints(".*", preserve_order=True)
 
         self.potentials = torch.zeros(self.num_envs, dtype=torch.float32, device=self.sim.device)
@@ -76,7 +74,7 @@ class LocomotionAMPEnv(DirectRLEnv):
         self.basis_vec1 = self.up_vec.clone()
 
         # AMP specific
-        motion_file = "amp_humanoid_run.npy"
+        motion_file = "amp_humanoid_walk.npy"
         motion_file_path = os.path.join("/home/mankaran/orbit/source/extensions/omni.isaac.lab_assets/omni/isaac/lab_assets/humanoid_amp/motions", motion_file)
         self._motion_lib = MotionLib(motion_file=motion_file_path, 
                                      num_dofs=NUM_DOFS,
@@ -96,6 +94,7 @@ class LocomotionAMPEnv(DirectRLEnv):
         self._hist_amp_obs_buf = self._amp_obs_buf[:, 1:]
 
     def _setup_scene(self):
+        #self.cfg.robot.spawn.articulation_props.fix_root_link = True
         self.robot = Articulation(self.cfg.robot)
         # add ground plane
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
@@ -112,8 +111,8 @@ class LocomotionAMPEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor):
         self._actions = actions.clone()
-        self._processed_actions = self.cfg.action_scale * self._actions + self.robot.data.default_joint_pos
-        #self._processed_actions = self._pd_action_offset + self._pd_action_scale * self.actions
+        #self._processed_actions = self.action_scale * self._actions + self.robot.data.default_joint_pos
+        self._processed_actions = self._pd_action_offset + self._pd_action_scale * self._actions
 
     def _apply_action(self):
         # pd_targets = self._pd_action_offset + self._pd_action_scale * self.actions
@@ -178,63 +177,21 @@ class LocomotionAMPEnv(DirectRLEnv):
 
         return
 
-    def _compute_intermediate_values(self):
-        self.torso_position, self.torso_rotation = self.robot.data.root_pos_w, self.robot.data.root_quat_w
-        self.velocity, self.ang_velocity = self.robot.data.root_lin_vel_w, self.robot.data.root_ang_vel_w
-        self.dof_pos, self.dof_vel = self.robot.data.joint_pos, self.robot.data.joint_vel
-
-        # print("### root", self.torso_position.shape, self.torso_rotation.shape, self.velocity.shape, self.ang_velocity.shape)
-        # print("### dofs", self.dof_pos.shape, self.dof_vel.shape, self.robot.data.body_names)
-        # print("### body", self.robot.data.body_names, self.robot.data.body_pos_w)
-
-        (
-            self.up_proj,
-            self.heading_proj,
-            self.up_vec,
-            self.heading_vec,
-            self.vel_loc,
-            self.angvel_loc,
-            self.roll,
-            self.pitch,
-            self.yaw,
-            self.angle_to_target,
-            self.dof_pos_scaled,
-            self.prev_potentials,
-            self.potentials,
-        ) = compute_intermediate_values(
-            self.targets,
-            self.torso_position,
-            self.torso_rotation,
-            self.velocity,
-            self.ang_velocity,
-            self.dof_pos,
-            self.robot.data.soft_joint_pos_limits[0, :, 0],
-            self.robot.data.soft_joint_pos_limits[0, :, 1],
-            self.inv_start_rot,
-            self.basis_vec0,
-            self.basis_vec1,
-            self.potentials,
-            self.prev_potentials,
-            self.cfg.sim.dt,
-        )  
-    
     def get_observations(self):
         return self._get_observations()
 
     def _get_observations(self) -> dict:
-        amp_obs = build_amp_observations(self.robot.data.root_pos_w, self.robot.data.root_quat_w, self.robot.data.root_lin_vel_w, self.robot.data.root_ang_vel_w, \
-                                          self.dof_pos, self.dof_vel, self.robot.data.body_pos_w[:, KEY_BODY_IDS])
+        amp_obs = build_amp_observations(self.robot.data.root_pos_w, math_utils.convert_quat(self.robot.data.root_quat_w, to="xyzw"), self.robot.data.root_lin_vel_w, self.robot.data.root_ang_vel_w, \
+                                          self.robot.data.joint_pos, self.robot.data.joint_vel, self.robot.data.body_pos_w[:, KEY_BODY_IDS])
         observations = {"policy": amp_obs}
-
-        self._update_hist_amp_obs()
-        self._compute_amp_observations()
-
-        amp_obs_flat = self._amp_obs_buf.view(-1, self.num_amp_obs)
-        self.extras["amp_obs"] = amp_obs_flat
-
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
+        self._update_hist_amp_obs()
+        self._compute_amp_observations()
+    
+        amp_obs_flat = self._amp_obs_buf.view(-1, self.num_amp_obs)
+        self.extras["amp_obs"] = amp_obs_flat
         return self.task_reward
     
     def _init_amp_obs_default(self, env_ids):
@@ -253,17 +210,16 @@ class LocomotionAMPEnv(DirectRLEnv):
 
     def _compute_amp_observations(self, env_ids=None):
         if (env_ids is None):
-            self._curr_amp_obs_buf[:] = build_amp_observations(self.robot.data.root_pos_w, self.robot.data.root_quat_w, self.robot.data.root_lin_vel_w, self.robot.data.root_ang_vel_w, \
-                                          self.dof_pos, self.dof_vel, self.robot.data.body_pos_w[:, KEY_BODY_IDS])
+            self._curr_amp_obs_buf[:] = build_amp_observations(self.robot.data.root_pos_w, math_utils.convert_quat(self.robot.data.root_quat_w, to="xyzw"), self.robot.data.root_lin_vel_w, self.robot.data.root_ang_vel_w, \
+                                          self.robot.data.joint_pos, self.robot.data.joint_vel, self.robot.data.body_pos_w[:, KEY_BODY_IDS])
         else:            
-            self._curr_amp_obs_buf[env_ids] = build_amp_observations(self.robot.data.root_pos_w[env_ids], self.robot.data.root_quat_w[env_ids], self.robot.data.root_lin_vel_w[env_ids], self.robot.data.root_ang_vel_w[env_ids], \
-                                          self.dof_pos[env_ids], self.dof_vel[env_ids], self.robot.data.body_pos_w[:, KEY_BODY_IDS][env_ids])
+            self._curr_amp_obs_buf[env_ids] = build_amp_observations(self.robot.data.root_pos_w[env_ids], math_utils.convert_quat(self.robot.data.root_quat_w[env_ids], to="xyzw"), self.robot.data.root_lin_vel_w[env_ids], self.robot.data.root_ang_vel_w[env_ids], \
+                                          self.robot.data.joint_pos[env_ids], self.robot.data.joint_vel[env_ids], self.robot.data.body_pos_w[:, KEY_BODY_IDS][env_ids])
         return
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        self._compute_intermediate_values()
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        died = self.torso_position[:, 2] < self.cfg.termination_height
+        died = self.robot.data.root_pos_w[:, 2] < self.cfg.termination_height
         return died, time_out
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
@@ -278,91 +234,33 @@ class LocomotionAMPEnv(DirectRLEnv):
         #motion_times = np.zeros(num_envs)
 
         # set half elements to start of the clip
-        indices = np.random.choice(num_envs, num_envs//2, replace=False)    
-        motion_times[indices] = 0
+        indices = np.random.choice(num_envs, int(num_envs*0.5), replace=False)    
 
         root_pos, root_rot, dof_pos, root_vel, root_ang_vel, dof_vel, key_pos = self._motion_lib.get_motion_state(motion_ids, motion_times)
-
         root_rot = math_utils.convert_quat(root_rot, to="wxyz")
-
-        joint_pos = dof_pos
-        joint_vel = dof_vel
-        default_root_state = self.robot.data.default_root_state[env_ids]
-        default_root_state[:, :3] = root_pos
-        default_root_state[:, 3:7] = root_rot
-        default_root_state[:, 7:10] = root_vel
-        default_root_state[:, 10:13] = root_ang_vel
         
-        default_root_state[:, :3] += self.scene.env_origins[env_ids]
+        joint_pos = self.robot.data.default_joint_pos[env_ids]
+        joint_vel = self.robot.data.default_joint_vel[env_ids]
+        default_root_state = self.robot.data.default_root_state[env_ids]
 
+        joint_pos[indices] = dof_pos[indices]
+        joint_vel[indices] = dof_vel[indices]
+        default_root_state = self.robot.data.default_root_state[env_ids]
+        default_root_state[indices, :3] = root_pos[indices]
+        default_root_state[indices, 3:7] = root_rot[indices]
+        default_root_state[indices, 7:10] = root_vel[indices]
+        default_root_state[indices, 10:13] = root_ang_vel[indices]
+
+        default_root_state[:, :3] += self.scene.env_origins[env_ids]
 
         self.robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self.robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
-        to_target = self.targets[env_ids] - default_root_state[:, :3]
-        to_target[:, 2] = 0.0
-        self.potentials[env_ids] = -torch.norm(to_target, p=2, dim=-1) / self.cfg.sim.dt
-
-        self._compute_intermediate_values()
-
         self._compute_amp_observations(env_ids)
         self._init_amp_obs_default(env_ids)
 
         self.extras["terminate"] = self.reset_terminated
-
-# @torch.jit.script
-# def compute_rewards(
-#     actions: torch.Tensor,
-#     reset_terminated: torch.Tensor,
-#     up_weight: float,
-#     heading_weight: float,
-#     heading_proj: torch.Tensor,
-#     up_proj: torch.Tensor,
-#     dof_vel: torch.Tensor,
-#     dof_pos_scaled: torch.Tensor,
-#     potentials: torch.Tensor,
-#     prev_potentials: torch.Tensor,
-#     actions_cost_scale: float,
-#     energy_cost_scale: float,
-#     dof_vel_scale: float,
-#     death_cost: float,
-#     alive_reward_scale: float,
-#     motor_effort_ratio: torch.Tensor,
-# ):
-#     heading_weight_tensor = torch.ones_like(heading_proj) * heading_weight
-#     heading_reward = torch.where(heading_proj > 0.8, heading_weight_tensor, heading_weight * heading_proj / 0.8)
-
-#     # aligning up axis of robot and environment
-#     up_reward = torch.zeros_like(heading_reward)
-#     up_reward = torch.where(up_proj > 0.93, up_reward + up_weight, up_reward)
-
-#     # energy penalty for movement
-#     actions_cost = torch.sum(actions**2, dim=-1)
-#     electricity_cost = torch.sum(
-#         torch.abs(actions * dof_vel * dof_vel_scale) * motor_effort_ratio.unsqueeze(0),
-#         dim=-1,
-#     )
-
-#     # dof at limit cost
-#     dof_at_limit_cost = torch.sum(dof_pos_scaled > 0.98, dim=-1)
-
-#     # reward for duration of staying alive
-#     alive_reward = torch.ones_like(potentials) * alive_reward_scale
-#     progress_reward = potentials - prev_potentials
-
-#     total_reward = (
-#         progress_reward
-#         + alive_reward
-#         + up_reward
-#         + heading_reward
-#         - actions_cost_scale * actions_cost
-#         - energy_cost_scale * electricity_cost
-#         - dof_at_limit_cost
-#     )
-#     # adjust reward for fallen agents
-#     total_reward = torch.where(reset_terminated, torch.ones_like(total_reward) * death_cost, total_reward)
-#     return total_reward
 
 @torch.jit.script
 def dof_to_obs(pose):
@@ -424,54 +322,3 @@ def build_amp_observations(root_pos, root_rot, root_vel, root_ang_vel, dof_pos, 
 
     obs = torch.cat((root_h, root_rot_obs, local_root_vel, local_root_ang_vel, dof_obs, dof_vel, flat_local_key_pos), dim=-1)
     return obs
-
-@torch.jit.script
-def compute_intermediate_values(
-    targets: torch.Tensor,
-    torso_position: torch.Tensor,
-    torso_rotation: torch.Tensor,
-    velocity: torch.Tensor,
-    ang_velocity: torch.Tensor,
-    dof_pos: torch.Tensor,
-    dof_lower_limits: torch.Tensor,
-    dof_upper_limits: torch.Tensor,
-    inv_start_rot: torch.Tensor,
-    basis_vec0: torch.Tensor,
-    basis_vec1: torch.Tensor,
-    potentials: torch.Tensor,
-    prev_potentials: torch.Tensor,
-    dt: float,
-):
-    to_target = targets - torso_position
-    to_target[:, 2] = 0.0
-
-    torso_quat, up_proj, heading_proj, up_vec, heading_vec = compute_heading_and_up(
-        torso_rotation, inv_start_rot, to_target, basis_vec0, basis_vec1, 2
-    )
-
-    vel_loc, angvel_loc, roll, pitch, yaw, angle_to_target = compute_rot(
-        torso_quat, velocity, ang_velocity, targets, torso_position
-    )
-
-    dof_pos_scaled = torch_utils.maths.unscale(dof_pos, dof_lower_limits, dof_upper_limits)
-
-    to_target = targets - torso_position
-    to_target[:, 2] = 0.0
-    prev_potentials[:] = potentials
-    potentials = -torch.norm(to_target, p=2, dim=-1) / dt
-
-    return (
-        up_proj,
-        heading_proj,
-        up_vec,
-        heading_vec,
-        vel_loc,
-        angvel_loc,
-        roll,
-        pitch,
-        yaw,
-        angle_to_target,
-        dof_pos_scaled,
-        prev_potentials,
-        potentials,
-    )

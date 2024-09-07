@@ -133,7 +133,7 @@ def main():
     agent_cfg = AMP_DEFAULT_CONFIG.copy()
     agent_cfg["rollouts"] = 16  # memory_size
     agent_cfg["learning_epochs"] = 6
-    agent_cfg["mini_batches"] = 2  # 16 * 4096 / 32768
+    agent_cfg["mini_batches"] = 4  # 16 * 4096 / 32768
     agent_cfg["discount_factor"] = 0.99
     agent_cfg["lambda"] = 0.95
     agent_cfg["learning_rate"] = 5e-5

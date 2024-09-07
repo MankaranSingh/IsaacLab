@@ -21,7 +21,7 @@ from omni.isaac.lab_tasks.direct.locomotion.locomotion_amp_env import Locomotion
 @configclass
 class HumanoidAMPEnvCfg(DirectRLEnvCfg):
     # simulation
-    sim: SimulationCfg = SimulationCfg(dt=1 / 120)
+    sim: SimulationCfg = SimulationCfg(dt=1 / 60)
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="plane",
@@ -41,69 +41,15 @@ class HumanoidAMPEnvCfg(DirectRLEnvCfg):
 
     # robot
     robot: ArticulationCfg = HUMANOID_AMP_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-    joint_gears: list = [
-        67.5000,  # abdomen_x
-        67.5000,  # abdomen_y
-        67.5000,  # abdomen_z
-
-        135.0000,  # right_hip_x
-        135.0000,  # right_hip_y
-        135.0000,  # right_hip_z
-
-        135.0000,  # left_hip_x
-        135.0000,  # left_hip_y
-        135.0000,  # left_hip_z
-
-        22.5,  # neck_x
-        22.5,  # neck_y
-        22.5,  # neck_z
-
-        67.5000,  # left_shoulder_x
-        67.5000,  # left_shoulder_y
-        67.5000,  # left_shoulder_z
-        
-        67.5000,  # right_shoulder_x
-        67.5000,  # right_shoulder_y
-        67.5000,  # right_shoulder_z
-
-        90.0000,  # right_knee
-        90.0000,  # left_knee
-
-        45.0000,  # left_elbow
-        45.0000,  # right_elbow
-
-        22.5,  # right_ankle_x
-        22.5,  # right_ankle_y
-        22.5,  # right_ankle_z
-        
-        22.5,  # left_ankle_x
-        22.5,  # left_ankle_y
-        22.5,  # left_ankle_z
-    ]
-
-    joint_gears: list = [50.0]*28
 
     # env
-    episode_length_s = 15.0
+    episode_length_s = 10.0
     decimation = 2
     action_scale = 1.0
     num_actions = 28
     num_observations = 105
-    num_states = 0
 
-    heading_weight: float = 0.5
-    up_weight: float = 0.1
-
-    energy_cost_scale: float = 0.0
-    actions_cost_scale: float = 0.0
-    alive_reward_scale: float = 2.0
-    dof_vel_scale: float = 0.01
-
-    death_cost: float = -1.0
-    termination_height: float = 0.4
-
-    angular_velocity_scale: float = 0.25
-    contact_force_scale: float = 0.01
+    termination_height: float = 0.5
 
 
 class HumanoidAMPEnv(LocomotionAMPEnv):
